@@ -5,17 +5,9 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="2ffd767d-8651-4351-8350-7e0553aa1f1a" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/encodings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/config.properties" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/CSVLoader.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/DataTransformer.java" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/DataValidator.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/DataWarehouseETL.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/ETLControlManager.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/ETLJob.java" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/ETLScheduler.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/misc.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/pom.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -37,21 +29,21 @@
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="GitHubPullRequestSearchHistory"><![CDATA[{
-  "lastFilter": {
-    "state": "OPEN",
-    "assignee": "doqhuy268"
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;doqhuy268&quot;
   }
-}]]></component>
-  <component name="GithubPullRequestsUISettings"><![CDATA[{
-  "selectedUrlAndAccountId": {
-    "url": "https://github.com/doqhuy268/DataWarehouse.git",
-    "accountId": "fc2f5347-1666-415d-be10-6f2e0fee6e1f"
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/doqhuy268/DataWarehouse.git&quot;,
+    &quot;accountId&quot;: &quot;fc2f5347-1666-415d-be10-6f2e0fee6e1f&quot;
   }
-}]]></component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 2
-}]]></component>
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 2
+}</component>
   <component name="ProjectId" id="2pA1wB0pyIzRsaXVb0jKApm7Ixd" />
   <component name="ProjectLevelVcsManager" settingsEditedManually="true">
     <ConfirmationsSetting value="2" id="Add" />
@@ -62,10 +54,12 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "git-widget-placeholder": "Huy",
+    "git-widget-placeholder": "truong",
     "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "D:/DW/Project_MobilePrice/DataWarehouse",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -80,11 +74,15 @@
     ]
   }
 }]]></component>
+  <component name="RecentsManager">
+    <key name="CopyClassDialog.RECENTS_KEY">
+      <recent name="thu3.ca2.nhom3" />
+    </key>
+  </component>
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-jdk-9823dce3aa75-28b599e66164-intellij.indexing.shared.core-IU-242.23339.11" />
-        <option value="bundled-js-predefined-d6986cc7102b-5c90d61e3bab-JavaScript-IU-242.23339.11" />
+        <option value="jdk-21.0.1-openjdk-21.0.1-3183f394aec4-7d648f2c" />
       </set>
     </attachedChunks>
   </component>
@@ -97,6 +95,7 @@
       <option name="presentableId" value="Default" />
       <updated>1732194301609</updated>
       <workItem from="1732194302617" duration="437000" />
+      <workItem from="1732196237227" duration="2267000" />
     </task>
     <servers />
   </component>
