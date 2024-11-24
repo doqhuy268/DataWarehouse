@@ -8,16 +8,6 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.util.Properties;
 
-import java.io.FileInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.time.LocalDateTime;
-import java.util.Properties;
-
 public class DataWarehouseETL {
 
 	private static final String CONFIG_FILE = "config.properties";
