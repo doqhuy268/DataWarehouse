@@ -6,10 +6,7 @@ import com.opencsv.exceptions.CsvException;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.SQLException;
+import java.sql.*;
 import java.util.List;
 import java.util.Properties;
 
@@ -41,39 +38,89 @@ public class CSVLoader {
 			List<String[]> records = reader.readAll();
 			records.remove(0); // Bỏ qua hàng tiêu đề
 
-			String sql = "INSERT INTO staging_mobile (" +
-					"name, brand, model, battery_capacity, screen_size, touchscreen, resolution_x, resolution_y, " +
-					"processor, ram, internal_storage, rear_camera, front_camera, operating_system, price) " +
-					"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+			// Kiểm tra nếu dòng đã tồn tại
+			String selectSql = "SELECT id, price FROM staging_mobile " +
+					"WHERE name = ? AND brand = ? AND model = ?";
 
-			try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+			// Chèn dữ liệu mới
+			String insertSql = "INSERT INTO staging_mobile (" +
+					"name, brand, model, battery_capacity, screen_size, touchscreen, resolution_x, resolution_y, " +
+					"processor, ram, internal_storage, rear_camera, front_camera, operating_system, price, loaded_date) " +
+					"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, GETDATE())";
+
+			// Cập nhật giá nếu khác nhau
+			String updateSql = "UPDATE staging_mobile SET price = ?, last_updated = GETDATE() WHERE id = ?";
+
+			// Ghi log cập nhật giá
+			String logSql = "INSERT INTO price_update_log (mobile_id, old_price, new_price, updated_at) " +
+					"VALUES (?, ?, ?, GETDATE())";
+
+			try (PreparedStatement selectStmt = conn.prepareStatement(selectSql);
+				 PreparedStatement insertStmt = conn.prepareStatement(insertSql);
+				 PreparedStatement updateStmt = conn.prepareStatement(updateSql);
+				 PreparedStatement logStmt = conn.prepareStatement(logSql)) {
+
 				int batchSize = 500;
 				int batchCount = 0;
 
 				for (String[] record : records) {
 					try {
-						pstmt.setString(1, record[0]); // name
-						pstmt.setString(2, record[1]); // brand
-						pstmt.setString(3, record[2]); // model
-						pstmt.setInt(4, Integer.parseInt(record[3])); // battery_capacity
-						pstmt.setDouble(5, Double.parseDouble(record[4])); // screen_size
-						pstmt.setBoolean(6, Boolean.parseBoolean(record[5])); // touchscreen
-						pstmt.setInt(7, Integer.parseInt(record[6])); // resolution_x
-						pstmt.setInt(8, Integer.parseInt(record[7])); // resolution_y
-						pstmt.setString(9, record[8]); // processor
-						pstmt.setInt(10, Integer.parseInt(record[9])); // ram
-						pstmt.setInt(11, Integer.parseInt(record[10])); // internal_storage
-						pstmt.setString(12, record[11]); // rear_camera
-						pstmt.setString(13, record[12]); // front_camera
-						pstmt.setString(14, record[13]); // operating_system
-						pstmt.setDouble(15, Double.parseDouble(record[14])); // price
+						String name = record[0];
+						String brand = record[1];
+						String model = record[2];
+						double price = Double.parseDouble(record[14]);
 
-						pstmt.addBatch();
-						recordsLoaded++;
-						batchCount++;
+						// Kiểm tra nếu dữ liệu đã tồn tại
+						selectStmt.setString(1, name);
+						selectStmt.setString(2, brand);
+						selectStmt.setString(3, model);
+
+						ResultSet rs = selectStmt.executeQuery();
+						if (rs.next()) {
+							int id = rs.getInt("id");
+							double oldPrice = rs.getDouble("price");
+
+							// Nếu giá thay đổi, cập nhật và ghi log
+							if (oldPrice != price) {
+								updateStmt.setDouble(1, price);
+								updateStmt.setInt(2, id);
+								updateStmt.addBatch();
+
+								logStmt.setInt(1, id);
+								logStmt.setDouble(2, oldPrice);
+								logStmt.setDouble(3, price);
+								logStmt.addBatch();
+
+								batchCount++;
+							}
+						} else {
+							// Thêm dữ liệu mới
+							insertStmt.setString(1, name);
+							insertStmt.setString(2, brand);
+							insertStmt.setString(3, model);
+							insertStmt.setInt(4, Integer.parseInt(record[3])); // battery_capacity
+							insertStmt.setDouble(5, Double.parseDouble(record[4])); // screen_size
+							insertStmt.setBoolean(6, Boolean.parseBoolean(record[5])); // touchscreen
+							insertStmt.setInt(7, Integer.parseInt(record[6])); // resolution_x
+							insertStmt.setInt(8, Integer.parseInt(record[7])); // resolution_y
+							insertStmt.setString(9, record[8]); // processor
+							insertStmt.setInt(10, Integer.parseInt(record[9])); // ram
+							insertStmt.setInt(11, Integer.parseInt(record[10])); // internal_storage
+							insertStmt.setString(12, record[11]); // rear_camera
+							insertStmt.setString(13, record[12]); // front_camera
+							insertStmt.setString(14, record[13]); // operating_system
+							insertStmt.setDouble(15, price); // price
+
+							insertStmt.addBatch();
+							recordsLoaded++;
+							batchCount++;
+						}
 
 						if (batchCount % batchSize == 0) {
-							pstmt.executeBatch();
+							insertStmt.executeBatch();
+							updateStmt.executeBatch();
+							logStmt.executeBatch();
+							batchCount = 0;
 						}
 					} catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
 						System.err.println("Error parsing record: " + String.join(", ", record));
@@ -81,15 +128,16 @@ public class CSVLoader {
 					}
 				}
 
-				// Execute any remaining batch
-				pstmt.executeBatch();
+				// Thực thi các batch còn lại
+				insertStmt.executeBatch();
+				updateStmt.executeBatch();
+				logStmt.executeBatch();
 			}
 		} catch (IOException | CsvException | SQLException e) {
 			e.printStackTrace();
 		}
 		return recordsLoaded;
 	}
-
 	private int recordsProcessed = 0;
 
 	public void loadCSV(String filePath, String tableName) throws Exception {
