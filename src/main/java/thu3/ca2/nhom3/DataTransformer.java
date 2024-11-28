@@ -148,12 +148,14 @@ public class DataTransformer {
     private int loadFactPhone(Connection stagingConn, Connection warehouseConn) throws SQLException {
         int recordsInserted = 0;
         String selectSQL = "SELECT * FROM staging_mobile";
-        String checkSQL = "SELECT 1 FROM FactPhone WHERE ModelKey = ? AND SpecKey = ? AND ProcessorKey = ? AND CameraKey = ? AND OSKey = ? AND Price = ?";
-        String insertSQL = "INSERT INTO FactPhone (ModelKey, SpecKey, ProcessorKey, CameraKey, OSKey, Price) VALUES (?, ?, ?, ?, ?, ?)";
+        String checkSQL = "SELECT PhoneKey, Price FROM FactPhone WHERE ModelKey = ? AND SpecKey = ? AND ProcessorKey = ? AND CameraKey = ? AND OSKey = ?";
+        String insertSQL = "INSERT INTO FactPhone (ModelKey, SpecKey, ProcessorKey, CameraKey, OSKey, Price, CreatedDate, UpdatedDate) VALUES (?, ?, ?, ?, ?, ?, GETDATE(), NULL)";
+        String updateSQL = "UPDATE FactPhone SET Price = ?, UpdatedDate = GETDATE() WHERE PhoneKey = ?";
 
         try (Statement stmt = stagingConn.createStatement();
              PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);
-             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {
+             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL);
+             PreparedStatement updateStmt = warehouseConn.prepareStatement(updateSQL)) {
 
             ResultSet rs = stmt.executeQuery(selectSQL);
             while (rs.next()) {
@@ -163,27 +165,72 @@ public class DataTransformer {
                 int cameraKey = getDimKey("DimCamera", "RearCamera", rs.getString("rear_camera"), warehouseConn);
                 int osKey = getDimKey("DimOS", "OSName", rs.getString("operating_system"), warehouseConn);
 
+                double newPrice = rs.getDouble("price");
+
+                // Kiểm tra bản ghi hiện tại
                 checkStmt.setInt(1, modelKey);
                 checkStmt.setInt(2, specKey);
                 checkStmt.setInt(3, processorKey);
                 checkStmt.setInt(4, cameraKey);
                 checkStmt.setInt(5, osKey);
-                checkStmt.setDouble(6, rs.getDouble("price"));
 
                 try (ResultSet checkRs = checkStmt.executeQuery()) {
-                    if (!checkRs.next()) { // Nếu không tồn tại
+                    if (checkRs.next()) {
+                        // Nếu đã tồn tại, kiểm tra giá
+                        int phoneKey = checkRs.getInt("PhoneKey");
+                        double oldPrice = checkRs.getDouble("Price");
+
+                        if (oldPrice != newPrice) {
+                            // Cập nhật giá nếu khác nhau
+                            updateStmt.setDouble(1, newPrice);
+                            updateStmt.setInt(2, phoneKey);
+                            updateStmt.executeUpdate();
+
+                            // Ghi log cập nhật giá
+                            logPriceUpdate(warehouseConn, phoneKey, oldPrice, newPrice);
+                        }
+                    } else {
+                        // Nếu chưa tồn tại, thêm mới
                         insertStmt.setInt(1, modelKey);
                         insertStmt.setInt(2, specKey);
                         insertStmt.setInt(3, processorKey);
                         insertStmt.setInt(4, cameraKey);
                         insertStmt.setInt(5, osKey);
-                        insertStmt.setDouble(6, rs.getDouble("price"));
+                        insertStmt.setDouble(6, newPrice);
                         recordsInserted += insertStmt.executeUpdate();
                     }
                 }
             }
         }
         return recordsInserted;
+    }
+
+
+    private int getFactKey(Connection warehouseConn, int modelKey, int specKey, int processorKey, int cameraKey, int osKey) throws SQLException {
+        String query = "SELECT PhoneKey FROM FactPhone WHERE ModelKey = ? AND SpecKey = ? AND ProcessorKey = ? AND CameraKey = ? AND OSKey = ?";
+        try (PreparedStatement pstmt = warehouseConn.prepareStatement(query)) {
+            pstmt.setInt(1, modelKey);
+            pstmt.setInt(2, specKey);
+            pstmt.setInt(3, processorKey);
+            pstmt.setInt(4, cameraKey);
+            pstmt.setInt(5, osKey);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("PhoneKey"); // Sử dụng PhoneKey thay vì fact_id
+                }
+            }
+        }
+        return -1; // Trả về -1 nếu không tìm thấy
+    }
+
+    private void logPriceUpdate(Connection warehouseConn, int phoneKey, double oldPrice, double newPrice) throws SQLException {
+        String logSQL = "INSERT INTO fact_price_update_log (fact_id, old_price, new_price, updated_at) VALUES (?, ?, ?, GETDATE())";
+        try (PreparedStatement logStmt = warehouseConn.prepareStatement(logSQL)) {
+            logStmt.setInt(1, phoneKey);
+            logStmt.setDouble(2, oldPrice);
+            logStmt.setDouble(3, newPrice);
+            logStmt.executeUpdate();
+        }
     }
 
 
