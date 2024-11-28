@@ -1,0 +1,441 @@
+Index: src/main/java/thu3/ca2/nhom3/DataTransformer.java
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+>package thu3.ca2.nhom3;\r\n\r\nimport java.io.FileInputStream;\r\nimport java.io.IOException;\r\nimport java.sql.*;\r\nimport java.util.Properties;\r\n\r\npublic class DataTransformer {\r\n    private String stagingDbUrl;\r\n    private String warehouseDbUrl;\r\n\r\n    public DataTransformer() {\r\n        loadConfig();\r\n    }\r\n\r\n    private void loadConfig() {\r\n        Properties properties = new Properties();\r\n        try (FileInputStream fis = new FileInputStream(\"config.properties\")) {\r\n            properties.load(fis);\r\n            stagingDbUrl = properties.getProperty(\"staging.db.url\");\r\n            warehouseDbUrl = properties.getProperty(\"warehouse.db.url\");\r\n        } catch (IOException e) {\r\n            System.err.println(\"Error loading config.properties: \" + e.getMessage());\r\n            throw new RuntimeException(\"Failed to load database configuration\", e);\r\n        }\r\n    }\r\n\r\n    public int transformData() {\r\n        int recordsTransformed = 0;\r\n\r\n        try (Connection stagingConn = DriverManager.getConnection(stagingDbUrl);\r\n             Connection warehouseConn = DriverManager.getConnection(warehouseDbUrl)) {\r\n\r\n            recordsTransformed += loadDimBrand(stagingConn, warehouseConn);\r\n            recordsTransformed += loadDimModel(stagingConn, warehouseConn);\r\n            recordsTransformed += loadDimSpecification(stagingConn, warehouseConn);\r\n            recordsTransformed += loadDimProcessor(stagingConn, warehouseConn);\r\n            recordsTransformed += loadDimCamera(stagingConn, warehouseConn);\r\n            recordsTransformed += loadDimOS(stagingConn, warehouseConn);\r\n            recordsTransformed += loadFactPhone(stagingConn, warehouseConn);\r\n\r\n        } catch (SQLException e) {\r\n            e.printStackTrace();\r\n        }\r\n\r\n        return recordsTransformed;\r\n    }\r\n\r\n\r\n    private int loadDimBrand(Connection stagingConn, Connection warehouseConn) throws SQLException {\r\n        int recordsInserted = 0;\r\n        String selectSQL = \"SELECT DISTINCT brand FROM staging_mobile\";\r\n        String checkSQL = \"SELECT 1 FROM DimBrand WHERE BrandName = ?\";\r\n        String insertSQL = \"INSERT INTO DimBrand (BrandName) VALUES (?)\";\r\n\r\n        try (Statement stmt = stagingConn.createStatement();\r\n             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);\r\n             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {\r\n\r\n            ResultSet rs = stmt.executeQuery(selectSQL);\r\n            while (rs.next()) {\r\n                String brand = rs.getString(\"brand\");\r\n\r\n                // Kiểm tra sự tồn tại\r\n                checkStmt.setString(1, brand);\r\n                try (ResultSet checkRs = checkStmt.executeQuery()) {\r\n                    if (!checkRs.next()) { // Nếu không tồn tại\r\n                        insertStmt.setString(1, brand);\r\n                        recordsInserted += insertStmt.executeUpdate();\r\n                    }\r\n                }\r\n            }\r\n        }\r\n        return recordsInserted;\r\n    }\r\n\r\n\r\n    private int loadDimModel(Connection stagingConn, Connection warehouseConn) throws SQLException {\r\n        int recordsInserted = 0;\r\n        String selectSQL = \"SELECT DISTINCT model, brand FROM staging_mobile\";\r\n        String checkSQL = \"SELECT 1 FROM DimModel WHERE ModelName = ? AND BrandKey = ?\";\r\n        String insertSQL = \"INSERT INTO DimModel (ModelName, BrandKey) VALUES (?, ?)\";\r\n\r\n        try (Statement stmt = stagingConn.createStatement();\r\n             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);\r\n             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {\r\n\r\n            ResultSet rs = stmt.executeQuery(selectSQL);\r\n            while (rs.next()) {\r\n                String model = rs.getString(\"model\");\r\n                int brandKey = getDimKey(\"DimBrand\", \"BrandName\", rs.getString(\"brand\"), warehouseConn);\r\n\r\n                // Kiểm tra sự tồn tại\r\n                checkStmt.setString(1, model);\r\n                checkStmt.setInt(2, brandKey);\r\n                try (ResultSet checkRs = checkStmt.executeQuery()) {\r\n                    if (!checkRs.next()) { // Nếu không tồn tại\r\n                        insertStmt.setString(1, model);\r\n                        insertStmt.setInt(2, brandKey);\r\n                        recordsInserted += insertStmt.executeUpdate();\r\n                    }\r\n                }\r\n            }\r\n        }\r\n        return recordsInserted;\r\n    }\r\n\r\n\r\n    private int loadDimSpecification(Connection stagingConn, Connection warehouseConn) throws SQLException {\r\n        int recordsInserted = 0;\r\n        String selectSQL = \"SELECT DISTINCT battery_capacity, screen_size, touchscreen, resolution_x, resolution_y, ram, internal_storage FROM staging_mobile\";\r\n        String checkSQL = \"SELECT 1 FROM DimSpecification WHERE BatteryCapacity = ? AND ScreenSize = ? AND Touchscreen = ? AND ResolutionX = ? AND ResolutionY = ? AND RAM = ? AND InternalStorage = ?\";\r\n        String insertSQL = \"INSERT INTO DimSpecification (BatteryCapacity, ScreenSize, Touchscreen, ResolutionX, ResolutionY, RAM, InternalStorage) VALUES (?, ?, ?, ?, ?, ?, ?)\";\r\n\r\n        try (Statement stmt = stagingConn.createStatement();\r\n             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);\r\n             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {\r\n\r\n            ResultSet rs = stmt.executeQuery(selectSQL);\r\n            while (rs.next()) {\r\n                checkStmt.setInt(1, rs.getInt(\"battery_capacity\"));\r\n                checkStmt.setDouble(2, rs.getDouble(\"screen_size\"));\r\n                checkStmt.setBoolean(3, rs.getBoolean(\"touchscreen\"));\r\n                checkStmt.setInt(4, rs.getInt(\"resolution_x\"));\r\n                checkStmt.setInt(5, rs.getInt(\"resolution_y\"));\r\n                checkStmt.setInt(6, rs.getInt(\"ram\"));\r\n                checkStmt.setInt(7, rs.getInt(\"internal_storage\"));\r\n\r\n                try (ResultSet checkRs = checkStmt.executeQuery()) {\r\n                    if (!checkRs.next()) { // Nếu không tồn tại\r\n                        insertStmt.setInt(1, rs.getInt(\"battery_capacity\"));\r\n                        insertStmt.setDouble(2, rs.getDouble(\"screen_size\"));\r\n                        insertStmt.setBoolean(3, rs.getBoolean(\"touchscreen\"));\r\n                        insertStmt.setInt(4, rs.getInt(\"resolution_x\"));\r\n                        insertStmt.setInt(5, rs.getInt(\"resolution_y\"));\r\n                        insertStmt.setInt(6, rs.getInt(\"ram\"));\r\n                        insertStmt.setInt(7, rs.getInt(\"internal_storage\"));\r\n                        recordsInserted += insertStmt.executeUpdate();\r\n                    }\r\n                }\r\n            }\r\n        }\r\n        return recordsInserted;\r\n    }\r\n\r\n\r\n\r\n    private int loadFactPhone(Connection stagingConn, Connection warehouseConn) throws SQLException {\r\n        int recordsInserted = 0;\r\n        String selectSQL = \"SELECT * FROM staging_mobile\";\r\n        String checkSQL = \"SELECT PhoneKey, Price FROM FactPhone WHERE ModelKey = ? AND SpecKey = ? AND ProcessorKey = ? AND CameraKey = ? AND OSKey = ?\";\r\n        String insertSQL = \"INSERT INTO FactPhone (ModelKey, SpecKey, ProcessorKey, CameraKey, OSKey, Price, CreatedDate, UpdatedDate) VALUES (?, ?, ?, ?, ?, ?, GETDATE(), NULL)\";\r\n        String updateSQL = \"UPDATE FactPhone SET Price = ?, UpdatedDate = GETDATE() WHERE PhoneKey = ?\";\r\n\r\n        try (Statement stmt = stagingConn.createStatement();\r\n             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);\r\n             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL);\r\n             PreparedStatement updateStmt = warehouseConn.prepareStatement(updateSQL)) {\r\n\r\n            ResultSet rs = stmt.executeQuery(selectSQL);\r\n            while (rs.next()) {\r\n                int modelKey = getDimKey(\"DimModel\", \"ModelName\", rs.getString(\"model\"), warehouseConn);\r\n                int specKey = getDimKey(\"DimSpecification\", \"ScreenSize\", rs.getString(\"screen_size\"), warehouseConn);\r\n                int processorKey = getDimKey(\"DimProcessor\", \"ProcessorName\", rs.getString(\"processor\"), warehouseConn);\r\n                int cameraKey = getDimKey(\"DimCamera\", \"RearCamera\", rs.getString(\"rear_camera\"), warehouseConn);\r\n                int osKey = getDimKey(\"DimOS\", \"OSName\", rs.getString(\"operating_system\"), warehouseConn);\r\n\r\n                double newPrice = rs.getDouble(\"price\");\r\n\r\n                // Kiểm tra bản ghi hiện tại\r\n                checkStmt.setInt(1, modelKey);\r\n                checkStmt.setInt(2, specKey);\r\n                checkStmt.setInt(3, processorKey);\r\n                checkStmt.setInt(4, cameraKey);\r\n                checkStmt.setInt(5, osKey);\r\n\r\n                try (ResultSet checkRs = checkStmt.executeQuery()) {\r\n                    if (checkRs.next()) {\r\n                        // Nếu đã tồn tại, kiểm tra giá\r\n                        int phoneKey = checkRs.getInt(\"PhoneKey\");\r\n                        double oldPrice = checkRs.getDouble(\"Price\");\r\n\r\n                        if (oldPrice != newPrice) {\r\n                            // Cập nhật giá nếu khác nhau\r\n                            updateStmt.setDouble(1, newPrice);\r\n                            updateStmt.setInt(2, phoneKey);\r\n                            updateStmt.executeUpdate();\r\n\r\n                            // Ghi log cập nhật giá\r\n                            logPriceUpdate(warehouseConn, phoneKey, oldPrice, newPrice);\r\n                        }\r\n                    } else {\r\n                        // Nếu chưa tồn tại, thêm mới\r\n                        insertStmt.setInt(1, modelKey);\r\n                        insertStmt.setInt(2, specKey);\r\n                        insertStmt.setInt(3, processorKey);\r\n                        insertStmt.setInt(4, cameraKey);\r\n                        insertStmt.setInt(5, osKey);\r\n                        insertStmt.setDouble(6, newPrice);\r\n                        recordsInserted += insertStmt.executeUpdate();\r\n                    }\r\n                }\r\n            }\r\n        }\r\n        return recordsInserted;\r\n    }\r\n\r\n\r\n    private int getFactKey(Connection warehouseConn, int modelKey, int specKey, int processorKey, int cameraKey, int osKey) throws SQLException {\r\n        String query = \"SELECT PhoneKey FROM FactPhone WHERE ModelKey = ? AND SpecKey = ? AND ProcessorKey = ? AND CameraKey = ? AND OSKey = ?\";\r\n        try (PreparedStatement pstmt = warehouseConn.prepareStatement(query)) {\r\n            pstmt.setInt(1, modelKey);\r\n            pstmt.setInt(2, specKey);\r\n            pstmt.setInt(3, processorKey);\r\n            pstmt.setInt(4, cameraKey);\r\n            pstmt.setInt(5, osKey);\r\n            try (ResultSet rs = pstmt.executeQuery()) {\r\n                if (rs.next()) {\r\n                    return rs.getInt(\"PhoneKey\"); // Sử dụng PhoneKey thay vì fact_id\r\n                }\r\n            }\r\n        }\r\n        return -1; // Trả về -1 nếu không tìm thấy\r\n    }\r\n\r\n    private void logPriceUpdate(Connection warehouseConn, int phoneKey, double oldPrice, double newPrice) throws SQLException {\r\n        String logSQL = \"INSERT INTO fact_price_update_log (fact_id, old_price, new_price, updated_at) VALUES (?, ?, ?, GETDATE())\";\r\n        try (PreparedStatement logStmt = warehouseConn.prepareStatement(logSQL)) {\r\n            logStmt.setInt(1, phoneKey);\r\n            logStmt.setDouble(2, oldPrice);\r\n            logStmt.setDouble(3, newPrice);\r\n            logStmt.executeUpdate();\r\n        }\r\n    }\r\n\r\n\r\n\r\n    private int loadDimProcessor(Connection stagingConn, Connection warehouseConn) throws SQLException {\r\n        int recordsInserted = 0;\r\n        String selectSQL = \"SELECT DISTINCT processor FROM staging_mobile\";\r\n        String checkSQL = \"SELECT COUNT(*) FROM DimProcessor WHERE ProcessorName = ?\";\r\n        String insertSQL = \"INSERT INTO DimProcessor (ProcessorName) VALUES (?)\";\r\n\r\n        try (Statement stmt = stagingConn.createStatement();\r\n             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);\r\n             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {\r\n\r\n            ResultSet rs = stmt.executeQuery(selectSQL);\r\n            while (rs.next()) {\r\n                String processor = rs.getString(\"processor\");\r\n\r\n                // Check if the processor already exists\r\n                checkStmt.setString(1, processor);\r\n                ResultSet checkResult = checkStmt.executeQuery();\r\n                checkResult.next();\r\n\r\n                if (checkResult.getInt(1) == 0) { // If not exists, insert\r\n                    insertStmt.setString(1, processor);\r\n                    recordsInserted += insertStmt.executeUpdate();\r\n                }\r\n            }\r\n        }\r\n        return recordsInserted;\r\n    }\r\n\r\n\r\n\r\n    private int loadDimCamera(Connection stagingConn, Connection warehouseConn) throws SQLException {\r\n        int recordsInserted = 0;\r\n        String selectSQL = \"SELECT DISTINCT rear_camera, front_camera FROM staging_mobile\";\r\n        String checkSQL = \"SELECT COUNT(*) FROM DimCamera WHERE RearCamera = ? AND FrontCamera = ?\";\r\n        String insertSQL = \"INSERT INTO DimCamera (RearCamera, FrontCamera) VALUES (?, ?)\";\r\n\r\n        try (Statement stmt = stagingConn.createStatement();\r\n             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);\r\n             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {\r\n\r\n            ResultSet rs = stmt.executeQuery(selectSQL);\r\n            while (rs.next()) {\r\n                String rearCamera = rs.getString(\"rear_camera\");\r\n                String frontCamera = rs.getString(\"front_camera\");\r\n\r\n                // Check if the camera combination already exists\r\n                checkStmt.setString(1, rearCamera);\r\n                checkStmt.setString(2, frontCamera);\r\n                ResultSet checkResult = checkStmt.executeQuery();\r\n                checkResult.next();\r\n\r\n                if (checkResult.getInt(1) == 0) { // If not exists, insert\r\n                    insertStmt.setString(1, rearCamera);\r\n                    insertStmt.setString(2, frontCamera);\r\n                    recordsInserted += insertStmt.executeUpdate();\r\n                }\r\n            }\r\n        }\r\n        return recordsInserted;\r\n    }\r\n\r\n\r\n\r\n    private int loadDimOS(Connection stagingConn, Connection warehouseConn) throws SQLException {\r\n        int recordsInserted = 0;\r\n        String selectSQL = \"SELECT DISTINCT operating_system FROM staging_mobile\";\r\n        String checkSQL = \"SELECT COUNT(*) FROM DimOS WHERE OSName = ?\";\r\n        String insertSQL = \"INSERT INTO DimOS (OSName) VALUES (?)\";\r\n\r\n        try (Statement stmt = stagingConn.createStatement();\r\n             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);\r\n             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {\r\n\r\n            ResultSet rs = stmt.executeQuery(selectSQL);\r\n            while (rs.next()) {\r\n                String osName = rs.getString(\"operating_system\");\r\n\r\n                // Check if the OS already exists\r\n                checkStmt.setString(1, osName);\r\n                ResultSet checkResult = checkStmt.executeQuery();\r\n                checkResult.next();\r\n\r\n                if (checkResult.getInt(1) == 0) { // If not exists, insert\r\n                    insertStmt.setString(1, osName);\r\n                    recordsInserted += insertStmt.executeUpdate();\r\n                }\r\n            }\r\n        }\r\n        return recordsInserted;\r\n    }\r\n\r\n\r\n\r\n\r\n    private int getDimKey(String tableName, String columnName, String value, Connection conn) throws SQLException {\r\n        String keyColumn = \"\";\r\n\r\n        // Xác định tên khóa chính dựa trên tên bảng\r\n        switch (tableName) {\r\n            case \"DimBrand\":\r\n                keyColumn = \"BrandKey\"; // Sử dụng tên cột đúng\r\n                break;\r\n            case \"DimModel\":\r\n                keyColumn = \"ModelKey\";\r\n                break;\r\n            case \"DimSpecification\":\r\n                keyColumn = \"SpecKey\";\r\n                break;\r\n            case \"DimProcessor\":\r\n                keyColumn = \"ProcessorKey\";\r\n                break;\r\n            case \"DimCamera\":\r\n                keyColumn = \"CameraKey\";\r\n                break;\r\n            case \"DimOS\":\r\n                keyColumn = \"OSKey\";\r\n                break;\r\n            default:\r\n                throw new SQLException(\"Invalid table name: \" + tableName);\r\n        }\r\n\r\n        String sql = \"SELECT \" + keyColumn + \" FROM \" + tableName + \" WHERE \" + columnName + \" = ?\";\r\n        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {\r\n            pstmt.setString(1, value);\r\n            ResultSet rs = pstmt.executeQuery();\r\n            if (rs.next()) {\r\n                return rs.getInt(1);\r\n            }\r\n        }\r\n        return -1; // Trả về -1 nếu không tìm thấy\r\n    }\r\n\r\n}
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/java/thu3/ca2/nhom3/DataTransformer.java b/src/main/java/thu3/ca2/nhom3/DataTransformer.java
+--- a/src/main/java/thu3/ca2/nhom3/DataTransformer.java	(revision 0b950f6cc576d888fdcd5b7f3ef5d00da258a2e2)
++++ b/src/main/java/thu3/ca2/nhom3/DataTransformer.java	(date 1732803696969)
+@@ -1,370 +1,4 @@
+ package thu3.ca2.nhom3;
+ 
+-import java.io.FileInputStream;
+-import java.io.IOException;
+-import java.sql.*;
+-import java.util.Properties;
+-
+ public class DataTransformer {
+-    private String stagingDbUrl;
+-    private String warehouseDbUrl;
+-
+-    public DataTransformer() {
+-        loadConfig();
+-    }
+-
+-    private void loadConfig() {
+-        Properties properties = new Properties();
+-        try (FileInputStream fis = new FileInputStream("config.properties")) {
+-            properties.load(fis);
+-            stagingDbUrl = properties.getProperty("staging.db.url");
+-            warehouseDbUrl = properties.getProperty("warehouse.db.url");
+-        } catch (IOException e) {
+-            System.err.println("Error loading config.properties: " + e.getMessage());
+-            throw new RuntimeException("Failed to load database configuration", e);
+-        }
+-    }
+-
+-    public int transformData() {
+-        int recordsTransformed = 0;
+-
+-        try (Connection stagingConn = DriverManager.getConnection(stagingDbUrl);
+-             Connection warehouseConn = DriverManager.getConnection(warehouseDbUrl)) {
+-
+-            recordsTransformed += loadDimBrand(stagingConn, warehouseConn);
+-            recordsTransformed += loadDimModel(stagingConn, warehouseConn);
+-            recordsTransformed += loadDimSpecification(stagingConn, warehouseConn);
+-            recordsTransformed += loadDimProcessor(stagingConn, warehouseConn);
+-            recordsTransformed += loadDimCamera(stagingConn, warehouseConn);
+-            recordsTransformed += loadDimOS(stagingConn, warehouseConn);
+-            recordsTransformed += loadFactPhone(stagingConn, warehouseConn);
+-
+-        } catch (SQLException e) {
+-            e.printStackTrace();
+-        }
+-
+-        return recordsTransformed;
+-    }
+-
+-
+-    private int loadDimBrand(Connection stagingConn, Connection warehouseConn) throws SQLException {
+-        int recordsInserted = 0;
+-        String selectSQL = "SELECT DISTINCT brand FROM staging_mobile";
+-        String checkSQL = "SELECT 1 FROM DimBrand WHERE BrandName = ?";
+-        String insertSQL = "INSERT INTO DimBrand (BrandName) VALUES (?)";
+-
+-        try (Statement stmt = stagingConn.createStatement();
+-             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);
+-             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {
+-
+-            ResultSet rs = stmt.executeQuery(selectSQL);
+-            while (rs.next()) {
+-                String brand = rs.getString("brand");
+-
+-                // Kiểm tra sự tồn tại
+-                checkStmt.setString(1, brand);
+-                try (ResultSet checkRs = checkStmt.executeQuery()) {
+-                    if (!checkRs.next()) { // Nếu không tồn tại
+-                        insertStmt.setString(1, brand);
+-                        recordsInserted += insertStmt.executeUpdate();
+-                    }
+-                }
+-            }
+-        }
+-        return recordsInserted;
+-    }
+-
+-
+-    private int loadDimModel(Connection stagingConn, Connection warehouseConn) throws SQLException {
+-        int recordsInserted = 0;
+-        String selectSQL = "SELECT DISTINCT model, brand FROM staging_mobile";
+-        String checkSQL = "SELECT 1 FROM DimModel WHERE ModelName = ? AND BrandKey = ?";
+-        String insertSQL = "INSERT INTO DimModel (ModelName, BrandKey) VALUES (?, ?)";
+-
+-        try (Statement stmt = stagingConn.createStatement();
+-             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);
+-             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {
+-
+-            ResultSet rs = stmt.executeQuery(selectSQL);
+-            while (rs.next()) {
+-                String model = rs.getString("model");
+-                int brandKey = getDimKey("DimBrand", "BrandName", rs.getString("brand"), warehouseConn);
+-
+-                // Kiểm tra sự tồn tại
+-                checkStmt.setString(1, model);
+-                checkStmt.setInt(2, brandKey);
+-                try (ResultSet checkRs = checkStmt.executeQuery()) {
+-                    if (!checkRs.next()) { // Nếu không tồn tại
+-                        insertStmt.setString(1, model);
+-                        insertStmt.setInt(2, brandKey);
+-                        recordsInserted += insertStmt.executeUpdate();
+-                    }
+-                }
+-            }
+-        }
+-        return recordsInserted;
+-    }
+-
+-
+-    private int loadDimSpecification(Connection stagingConn, Connection warehouseConn) throws SQLException {
+-        int recordsInserted = 0;
+-        String selectSQL = "SELECT DISTINCT battery_capacity, screen_size, touchscreen, resolution_x, resolution_y, ram, internal_storage FROM staging_mobile";
+-        String checkSQL = "SELECT 1 FROM DimSpecification WHERE BatteryCapacity = ? AND ScreenSize = ? AND Touchscreen = ? AND ResolutionX = ? AND ResolutionY = ? AND RAM = ? AND InternalStorage = ?";
+-        String insertSQL = "INSERT INTO DimSpecification (BatteryCapacity, ScreenSize, Touchscreen, ResolutionX, ResolutionY, RAM, InternalStorage) VALUES (?, ?, ?, ?, ?, ?, ?)";
+-
+-        try (Statement stmt = stagingConn.createStatement();
+-             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);
+-             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {
+-
+-            ResultSet rs = stmt.executeQuery(selectSQL);
+-            while (rs.next()) {
+-                checkStmt.setInt(1, rs.getInt("battery_capacity"));
+-                checkStmt.setDouble(2, rs.getDouble("screen_size"));
+-                checkStmt.setBoolean(3, rs.getBoolean("touchscreen"));
+-                checkStmt.setInt(4, rs.getInt("resolution_x"));
+-                checkStmt.setInt(5, rs.getInt("resolution_y"));
+-                checkStmt.setInt(6, rs.getInt("ram"));
+-                checkStmt.setInt(7, rs.getInt("internal_storage"));
+-
+-                try (ResultSet checkRs = checkStmt.executeQuery()) {
+-                    if (!checkRs.next()) { // Nếu không tồn tại
+-                        insertStmt.setInt(1, rs.getInt("battery_capacity"));
+-                        insertStmt.setDouble(2, rs.getDouble("screen_size"));
+-                        insertStmt.setBoolean(3, rs.getBoolean("touchscreen"));
+-                        insertStmt.setInt(4, rs.getInt("resolution_x"));
+-                        insertStmt.setInt(5, rs.getInt("resolution_y"));
+-                        insertStmt.setInt(6, rs.getInt("ram"));
+-                        insertStmt.setInt(7, rs.getInt("internal_storage"));
+-                        recordsInserted += insertStmt.executeUpdate();
+-                    }
+-                }
+-            }
+-        }
+-        return recordsInserted;
+-    }
+-
+-
+-
+-    private int loadFactPhone(Connection stagingConn, Connection warehouseConn) throws SQLException {
+-        int recordsInserted = 0;
+-        String selectSQL = "SELECT * FROM staging_mobile";
+-        String checkSQL = "SELECT PhoneKey, Price FROM FactPhone WHERE ModelKey = ? AND SpecKey = ? AND ProcessorKey = ? AND CameraKey = ? AND OSKey = ?";
+-        String insertSQL = "INSERT INTO FactPhone (ModelKey, SpecKey, ProcessorKey, CameraKey, OSKey, Price, CreatedDate, UpdatedDate) VALUES (?, ?, ?, ?, ?, ?, GETDATE(), NULL)";
+-        String updateSQL = "UPDATE FactPhone SET Price = ?, UpdatedDate = GETDATE() WHERE PhoneKey = ?";
+-
+-        try (Statement stmt = stagingConn.createStatement();
+-             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);
+-             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL);
+-             PreparedStatement updateStmt = warehouseConn.prepareStatement(updateSQL)) {
+-
+-            ResultSet rs = stmt.executeQuery(selectSQL);
+-            while (rs.next()) {
+-                int modelKey = getDimKey("DimModel", "ModelName", rs.getString("model"), warehouseConn);
+-                int specKey = getDimKey("DimSpecification", "ScreenSize", rs.getString("screen_size"), warehouseConn);
+-                int processorKey = getDimKey("DimProcessor", "ProcessorName", rs.getString("processor"), warehouseConn);
+-                int cameraKey = getDimKey("DimCamera", "RearCamera", rs.getString("rear_camera"), warehouseConn);
+-                int osKey = getDimKey("DimOS", "OSName", rs.getString("operating_system"), warehouseConn);
+-
+-                double newPrice = rs.getDouble("price");
+-
+-                // Kiểm tra bản ghi hiện tại
+-                checkStmt.setInt(1, modelKey);
+-                checkStmt.setInt(2, specKey);
+-                checkStmt.setInt(3, processorKey);
+-                checkStmt.setInt(4, cameraKey);
+-                checkStmt.setInt(5, osKey);
+-
+-                try (ResultSet checkRs = checkStmt.executeQuery()) {
+-                    if (checkRs.next()) {
+-                        // Nếu đã tồn tại, kiểm tra giá
+-                        int phoneKey = checkRs.getInt("PhoneKey");
+-                        double oldPrice = checkRs.getDouble("Price");
+-
+-                        if (oldPrice != newPrice) {
+-                            // Cập nhật giá nếu khác nhau
+-                            updateStmt.setDouble(1, newPrice);
+-                            updateStmt.setInt(2, phoneKey);
+-                            updateStmt.executeUpdate();
+-
+-                            // Ghi log cập nhật giá
+-                            logPriceUpdate(warehouseConn, phoneKey, oldPrice, newPrice);
+-                        }
+-                    } else {
+-                        // Nếu chưa tồn tại, thêm mới
+-                        insertStmt.setInt(1, modelKey);
+-                        insertStmt.setInt(2, specKey);
+-                        insertStmt.setInt(3, processorKey);
+-                        insertStmt.setInt(4, cameraKey);
+-                        insertStmt.setInt(5, osKey);
+-                        insertStmt.setDouble(6, newPrice);
+-                        recordsInserted += insertStmt.executeUpdate();
+-                    }
+-                }
+-            }
+-        }
+-        return recordsInserted;
+-    }
+-
+-
+-    private int getFactKey(Connection warehouseConn, int modelKey, int specKey, int processorKey, int cameraKey, int osKey) throws SQLException {
+-        String query = "SELECT PhoneKey FROM FactPhone WHERE ModelKey = ? AND SpecKey = ? AND ProcessorKey = ? AND CameraKey = ? AND OSKey = ?";
+-        try (PreparedStatement pstmt = warehouseConn.prepareStatement(query)) {
+-            pstmt.setInt(1, modelKey);
+-            pstmt.setInt(2, specKey);
+-            pstmt.setInt(3, processorKey);
+-            pstmt.setInt(4, cameraKey);
+-            pstmt.setInt(5, osKey);
+-            try (ResultSet rs = pstmt.executeQuery()) {
+-                if (rs.next()) {
+-                    return rs.getInt("PhoneKey"); // Sử dụng PhoneKey thay vì fact_id
+-                }
+-            }
+-        }
+-        return -1; // Trả về -1 nếu không tìm thấy
+-    }
+-
+-    private void logPriceUpdate(Connection warehouseConn, int phoneKey, double oldPrice, double newPrice) throws SQLException {
+-        String logSQL = "INSERT INTO fact_price_update_log (fact_id, old_price, new_price, updated_at) VALUES (?, ?, ?, GETDATE())";
+-        try (PreparedStatement logStmt = warehouseConn.prepareStatement(logSQL)) {
+-            logStmt.setInt(1, phoneKey);
+-            logStmt.setDouble(2, oldPrice);
+-            logStmt.setDouble(3, newPrice);
+-            logStmt.executeUpdate();
+-        }
+-    }
+-
+-
+-
+-    private int loadDimProcessor(Connection stagingConn, Connection warehouseConn) throws SQLException {
+-        int recordsInserted = 0;
+-        String selectSQL = "SELECT DISTINCT processor FROM staging_mobile";
+-        String checkSQL = "SELECT COUNT(*) FROM DimProcessor WHERE ProcessorName = ?";
+-        String insertSQL = "INSERT INTO DimProcessor (ProcessorName) VALUES (?)";
+-
+-        try (Statement stmt = stagingConn.createStatement();
+-             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);
+-             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {
+-
+-            ResultSet rs = stmt.executeQuery(selectSQL);
+-            while (rs.next()) {
+-                String processor = rs.getString("processor");
+-
+-                // Check if the processor already exists
+-                checkStmt.setString(1, processor);
+-                ResultSet checkResult = checkStmt.executeQuery();
+-                checkResult.next();
+-
+-                if (checkResult.getInt(1) == 0) { // If not exists, insert
+-                    insertStmt.setString(1, processor);
+-                    recordsInserted += insertStmt.executeUpdate();
+-                }
+-            }
+-        }
+-        return recordsInserted;
+-    }
+-
+-
+-
+-    private int loadDimCamera(Connection stagingConn, Connection warehouseConn) throws SQLException {
+-        int recordsInserted = 0;
+-        String selectSQL = "SELECT DISTINCT rear_camera, front_camera FROM staging_mobile";
+-        String checkSQL = "SELECT COUNT(*) FROM DimCamera WHERE RearCamera = ? AND FrontCamera = ?";
+-        String insertSQL = "INSERT INTO DimCamera (RearCamera, FrontCamera) VALUES (?, ?)";
+-
+-        try (Statement stmt = stagingConn.createStatement();
+-             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);
+-             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {
+-
+-            ResultSet rs = stmt.executeQuery(selectSQL);
+-            while (rs.next()) {
+-                String rearCamera = rs.getString("rear_camera");
+-                String frontCamera = rs.getString("front_camera");
+-
+-                // Check if the camera combination already exists
+-                checkStmt.setString(1, rearCamera);
+-                checkStmt.setString(2, frontCamera);
+-                ResultSet checkResult = checkStmt.executeQuery();
+-                checkResult.next();
+-
+-                if (checkResult.getInt(1) == 0) { // If not exists, insert
+-                    insertStmt.setString(1, rearCamera);
+-                    insertStmt.setString(2, frontCamera);
+-                    recordsInserted += insertStmt.executeUpdate();
+-                }
+-            }
+-        }
+-        return recordsInserted;
+-    }
+-
+-
+-
+-    private int loadDimOS(Connection stagingConn, Connection warehouseConn) throws SQLException {
+-        int recordsInserted = 0;
+-        String selectSQL = "SELECT DISTINCT operating_system FROM staging_mobile";
+-        String checkSQL = "SELECT COUNT(*) FROM DimOS WHERE OSName = ?";
+-        String insertSQL = "INSERT INTO DimOS (OSName) VALUES (?)";
+-
+-        try (Statement stmt = stagingConn.createStatement();
+-             PreparedStatement checkStmt = warehouseConn.prepareStatement(checkSQL);
+-             PreparedStatement insertStmt = warehouseConn.prepareStatement(insertSQL)) {
+-
+-            ResultSet rs = stmt.executeQuery(selectSQL);
+-            while (rs.next()) {
+-                String osName = rs.getString("operating_system");
+-
+-                // Check if the OS already exists
+-                checkStmt.setString(1, osName);
+-                ResultSet checkResult = checkStmt.executeQuery();
+-                checkResult.next();
+-
+-                if (checkResult.getInt(1) == 0) { // If not exists, insert
+-                    insertStmt.setString(1, osName);
+-                    recordsInserted += insertStmt.executeUpdate();
+-                }
+-            }
+-        }
+-        return recordsInserted;
+-    }
+-
+-
+-
+-
+-    private int getDimKey(String tableName, String columnName, String value, Connection conn) throws SQLException {
+-        String keyColumn = "";
+-
+-        // Xác định tên khóa chính dựa trên tên bảng
+-        switch (tableName) {
+-            case "DimBrand":
+-                keyColumn = "BrandKey"; // Sử dụng tên cột đúng
+-                break;
+-            case "DimModel":
+-                keyColumn = "ModelKey";
+-                break;
+-            case "DimSpecification":
+-                keyColumn = "SpecKey";
+-                break;
+-            case "DimProcessor":
+-                keyColumn = "ProcessorKey";
+-                break;
+-            case "DimCamera":
+-                keyColumn = "CameraKey";
+-                break;
+-            case "DimOS":
+-                keyColumn = "OSKey";
+-                break;
+-            default:
+-                throw new SQLException("Invalid table name: " + tableName);
+-        }
+-
+-        String sql = "SELECT " + keyColumn + " FROM " + tableName + " WHERE " + columnName + " = ?";
+-        try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+-            pstmt.setString(1, value);
+-            ResultSet rs = pstmt.executeQuery();
+-            if (rs.next()) {
+-                return rs.getInt(1);
+-            }
+-        }
+-        return -1; // Trả về -1 nếu không tìm thấy
+-    }
+-
+-}
+\ No newline at end of file
++}
+Index: .idea/workspace.xml
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.BaseRevisionTextPatchEP
+<+><?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<project version=\"4\">\r\n  <component name=\"AutoImportSettings\">\r\n    <option name=\"autoReloadType\" value=\"SELECTIVE\" />\r\n  </component>\r\n  <component name=\"ChangeListManager\">\r\n    <list default=\"true\" id=\"2ffd767d-8651-4351-8350-7e0553aa1f1a\" name=\"Changes\" comment=\"\" />\r\n    <option name=\"SHOW_DIALOG\" value=\"false\" />\r\n    <option name=\"HIGHLIGHT_CONFLICTS\" value=\"true\" />\r\n    <option name=\"HIGHLIGHT_NON_ACTIVE_CHANGELIST\" value=\"false\" />\r\n    <option name=\"LAST_RESOLUTION\" value=\"IGNORE\" />\r\n  </component>\r\n  <component name=\"FileTemplateManagerImpl\">\r\n    <option name=\"RECENT_TEMPLATES\">\r\n      <list>\r\n        <option value=\"Class\" />\r\n      </list>\r\n    </option>\r\n  </component>\r\n  <component name=\"Git.Settings\">\r\n    <option name=\"RECENT_BRANCH_BY_REPOSITORY\">\r\n      <map>\r\n        <entry key=\"$PROJECT_DIR$\" value=\"master\" />\r\n      </map>\r\n    </option>\r\n    <option name=\"RECENT_GIT_ROOT_PATH\" value=\"$PROJECT_DIR$\" />\r\n  </component>\r\n  <component name=\"GitHubPullRequestSearchHistory\">{\r\n  &quot;lastFilter&quot;: {\r\n    &quot;state&quot;: &quot;OPEN&quot;,\r\n    &quot;assignee&quot;: &quot;doqhuy268&quot;\r\n  }\r\n}</component>\r\n  <component name=\"GithubPullRequestsUISettings\">{\r\n  &quot;selectedUrlAndAccountId&quot;: {\r\n    &quot;url&quot;: &quot;https://github.com/doqhuy268/DataWarehouse.git&quot;,\r\n    &quot;accountId&quot;: &quot;fc2f5347-1666-415d-be10-6f2e0fee6e1f&quot;\r\n  }\r\n}</component>\r\n  <component name=\"MarkdownSettingsMigration\">\r\n    <option name=\"stateVersion\" value=\"1\" />\r\n  </component>\r\n  <component name=\"ProjectColorInfo\">{\r\n  &quot;associatedIndex&quot;: 2\r\n}</component>\r\n  <component name=\"ProjectId\" id=\"2pA1wB0pyIzRsaXVb0jKApm7Ixd\" />\r\n  <component name=\"ProjectLevelVcsManager\" settingsEditedManually=\"true\">\r\n    <ConfirmationsSetting value=\"2\" id=\"Add\" />\r\n  </component>\r\n  <component name=\"ProjectViewState\">\r\n    <option name=\"hideEmptyMiddlePackages\" value=\"true\" />\r\n    <option name=\"showLibraryContents\" value=\"true\" />\r\n  </component>\r\n  <component name=\"PropertiesComponent\"><![CDATA[{\r\n  \"keyToString\": {\r\n    \"RunOnceActivity.OpenProjectViewOnStart\": \"true\",\r\n    \"RunOnceActivity.ShowReadmeOnStart\": \"true\",\r\n    \"SHARE_PROJECT_CONFIGURATION_FILES\": \"true\",\r\n    \"WebServerToolWindowFactoryState\": \"false\",\r\n    \"git-widget-placeholder\": \"truong\",\r\n    \"kotlin-language-version-configured\": \"true\",\r\n    \"last_opened_file_path\": \"C:/Users/USER/Desktop/DataWarehouse\",\r\n    \"node.js.detected.package.eslint\": \"true\",\r\n    \"node.js.detected.package.tslint\": \"true\",\r\n    \"node.js.selected.package.eslint\": \"(autodetect)\",\r\n    \"node.js.selected.package.tslint\": \"(autodetect)\",\r\n    \"nodejs_package_manager_path\": \"npm\",\r\n    \"vue.rearranger.settings.migration\": \"true\"\r\n  },\r\n  \"keyToStringList\": {\r\n    \"ChangesTree.GroupingKeys\": [\r\n      \"directory\",\r\n      \"module\"\r\n    ]\r\n  }\r\n}]]></component>\r\n  <component name=\"RecentsManager\">\r\n    <key name=\"CopyClassDialog.RECENTS_KEY\">\r\n      <recent name=\"thu3.ca2.nhom3\" />\r\n    </key>\r\n  </component>\r\n  <component name=\"SharedIndexes\">\r\n    <attachedChunks>\r\n      <set>\r\n        <option value=\"jdk-21.0.1-openjdk-21.0.1-3183f394aec4-7d648f2c\" />\r\n      </set>\r\n    </attachedChunks>\r\n  </component>\r\n  <component name=\"SpellCheckerSettings\" RuntimeDictionaries=\"0\" Folders=\"0\" CustomDictionaries=\"0\" DefaultDictionary=\"application-level\" UseSingleDictionary=\"true\" transferred=\"true\" />\r\n  <component name=\"TaskManager\">\r\n    <task active=\"true\" id=\"Default\" summary=\"Default task\">\r\n      <changelist id=\"2ffd767d-8651-4351-8350-7e0553aa1f1a\" name=\"Changes\" comment=\"\" />\r\n      <created>1732194301609</created>\r\n      <option name=\"number\" value=\"Default\" />\r\n      <option name=\"presentableId\" value=\"Default\" />\r\n      <updated>1732194301609</updated>\r\n      <workItem from=\"1732194302617\" duration=\"437000\" />\r\n      <workItem from=\"1732196237227\" duration=\"2267000\" />\r\n      <workItem from=\"1732450398145\" duration=\"364000\" />\r\n      <workItem from=\"1732450811297\" duration=\"74000\" />\r\n      <workItem from=\"1732539641547\" duration=\"38000\" />\r\n      <workItem from=\"1732798916416\" duration=\"173000\" />\r\n      <workItem from=\"1732800137507\" duration=\"393000\" />\r\n    </task>\r\n    <servers />\r\n  </component>\r\n  <component name=\"TypeScriptGeneratedFilesManager\">\r\n    <option name=\"version\" value=\"3\" />\r\n  </component>\r\n  <component name=\"Vcs.Log.Tabs.Properties\">\r\n    <option name=\"TAB_STATES\">\r\n      <map>\r\n        <entry key=\"MAIN\">\r\n          <value>\r\n            <State />\r\n          </value>\r\n        </entry>\r\n      </map>\r\n    </option>\r\n  </component>\r\n</project>
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/.idea/workspace.xml b/.idea/workspace.xml
+--- a/.idea/workspace.xml	(revision 0b950f6cc576d888fdcd5b7f3ef5d00da258a2e2)
++++ b/.idea/workspace.xml	(date 1732804066951)
+@@ -4,7 +4,10 @@
+     <option name="autoReloadType" value="SELECTIVE" />
+   </component>
+   <component name="ChangeListManager">
+-    <list default="true" id="2ffd767d-8651-4351-8350-7e0553aa1f1a" name="Changes" comment="" />
++    <list default="true" id="2ffd767d-8651-4351-8350-7e0553aa1f1a" name="Changes" comment="">
++      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
++      <change beforePath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/DataTransformer.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/thu3/ca2/nhom3/DataTransformer.java" afterDir="false" />
++    </list>
+     <option name="SHOW_DIALOG" value="false" />
+     <option name="HIGHLIGHT_CONFLICTS" value="true" />
+     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+@@ -37,8 +40,8 @@
+     &quot;accountId&quot;: &quot;fc2f5347-1666-415d-be10-6f2e0fee6e1f&quot;
+   }
+ }</component>
+-  <component name="MarkdownSettingsMigration">
+-    <option name="stateVersion" value="1" />
++  <component name="ProblemsViewState">
++    <option name="selectedTabId" value="ProjectErrors" />
+   </component>
+   <component name="ProjectColorInfo">{
+   &quot;associatedIndex&quot;: 2
+@@ -56,10 +59,9 @@
+     "RunOnceActivity.OpenProjectViewOnStart": "true",
+     "RunOnceActivity.ShowReadmeOnStart": "true",
+     "SHARE_PROJECT_CONFIGURATION_FILES": "true",
+-    "WebServerToolWindowFactoryState": "false",
+-    "git-widget-placeholder": "truong",
++    "git-widget-placeholder": "main",
+     "kotlin-language-version-configured": "true",
+-    "last_opened_file_path": "C:/Users/USER/Desktop/DataWarehouse",
++    "last_opened_file_path": "D:/DW/Project_MobilePrice/DataWarehouse",
+     "node.js.detected.package.eslint": "true",
+     "node.js.detected.package.tslint": "true",
+     "node.js.selected.package.eslint": "(autodetect)",
+@@ -96,11 +98,6 @@
+       <updated>1732194301609</updated>
+       <workItem from="1732194302617" duration="437000" />
+       <workItem from="1732196237227" duration="2267000" />
+-      <workItem from="1732450398145" duration="364000" />
+-      <workItem from="1732450811297" duration="74000" />
+-      <workItem from="1732539641547" duration="38000" />
+-      <workItem from="1732798916416" duration="173000" />
+-      <workItem from="1732800137507" duration="393000" />
+     </task>
+     <servers />
+   </component>
