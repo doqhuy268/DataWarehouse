@@ -1,12 +1,21 @@
 package thu3.ca2.nhom3;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.io.FileInputStream;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.sql.*;
 import java.time.LocalDateTime;
+import java.util.*;
+
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.Properties;
+import java.util.stream.Collectors;
 
 public class DataWarehouseETL {
 
@@ -70,56 +79,130 @@ public class DataWarehouseETL {
 	}
 
 	private static int validateDataQuality(String tableName, Connection conn, ETLControlManager controlManager)
-			throws SQLException {
-		DataValidator validator = new DataValidator();
-		int nullCount = validator.checkNullValues(tableName, conn);
-		int rangeCount = validator.checkRangeValues(tableName, conn);
-		int duplicateCount = validator.checkDuplicates(tableName, conn);
+			throws SQLException, JsonProcessingException {
+		DataValidator validator = new DataValidator(conn);
+		int totalIssues = 0;
 
-		// Log kết quả kiểm tra
-		if (nullCount > 0) {
-			controlManager.logDataQualityCheck("STAGING_DATA_VALIDATION", tableName, nullCount, "NULL values found");
-			removeInvalidRecords(tableName, "NULL_CHECK", conn);
-		}
-		if (rangeCount > 0) {
-			controlManager.logDataQualityCheck("STAGING_DATA_VALIDATION", tableName, rangeCount, "Out of range values found");
-			removeInvalidRecords(tableName, "RANGE_CHECK", conn);
-		}
-		if (duplicateCount > 0) {
-			controlManager.logDataQualityCheck("STAGING_DATA_VALIDATION", tableName, duplicateCount, "Duplicate records found");
-			removeInvalidRecords(tableName, "DUPLICATE_CHECK", conn);
+		if (validator.isValidateNull()) {
+			int nullCount = validator.checkNullValues(tableName);
+			if (nullCount > 0) {
+				controlManager.logDataQualityCheck("STAGING_DATA_VALIDATION", tableName, nullCount, "NULL values found");
+				removeInvalidRecords(tableName, "NULL_CHECK", conn);
+				totalIssues += nullCount;
+			}
 		}
 
-		return nullCount + rangeCount + duplicateCount;
+		if (validator.isValidateRange()) {
+			int rangeCount = validator.checkRangeValues(tableName);
+			if (rangeCount > 0) {
+				controlManager.logDataQualityCheck("STAGING_DATA_VALIDATION", tableName, rangeCount, "Out of range values found");
+				removeInvalidRecords(tableName, "RANGE_CHECK", conn);
+				totalIssues += rangeCount;
+			}
+		}
+
+		if (validator.isValidateDuplicate()) {
+			int duplicateCount = validator.checkDuplicates(tableName);
+			if (duplicateCount > 0) {
+				controlManager.logDataQualityCheck("STAGING_DATA_VALIDATION", tableName, duplicateCount, "Duplicate records found");
+				removeInvalidRecords(tableName, "DUPLICATE_CHECK", conn);
+				totalIssues += duplicateCount;
+			}
+		}
+
+		return totalIssues;
 	}
 
 
-	private static void removeInvalidRecords(String tableName, String reason, Connection conn) throws SQLException {
-		String deleteSQL = switch (reason) {
-			case "NULL_CHECK" -> """
-            DELETE FROM %s
-            WHERE name IS NULL OR brand IS NULL OR price IS NULL
-        """.formatted(tableName); // Các cột bắt buộc không được NULL
-			case "RANGE_CHECK" -> """
-            DELETE FROM %s
-            WHERE battery_capacity <= 0 OR price < 0 OR screen_size <= 0
-        """.formatted(tableName); // Điều kiện giá trị hợp lệ
-			case "DUPLICATE_CHECK" -> """
-            DELETE FROM %s
-            WHERE id NOT IN (
-                SELECT MIN(id)
-                FROM %s
-                GROUP BY name, brand, model, price
-            )
-        """.formatted(tableName, tableName); // Loại bỏ các bản ghi trùng
+	private static void removeInvalidRecords(String tableName, String reason, Connection conn) throws SQLException, JsonProcessingException {
+		DataValidator validator = new DataValidator(conn);
+		String selectInvalidSQL;
+		String deleteSQL;
+
+		switch (reason) {
+			case "NULL_CHECK" -> {
+				List<String> nullColumns = validator.getNullColumns();
+				if (nullColumns.isEmpty()) {
+					System.out.println("No NULL_CHECK columns defined in configuration. Skipping removal.");
+					return;
+				}
+				String nullConditions = nullColumns.stream()
+						.map(column -> column + " IS NULL")
+						.collect(Collectors.joining(" OR "));
+				selectInvalidSQL = "SELECT * FROM " + tableName + " WHERE " + nullConditions;
+				deleteSQL = "DELETE FROM " + tableName + " WHERE " + nullConditions;
+			}
+			case "RANGE_CHECK" -> {
+				List<String> rangeColumns = validator.getRangeColumns();
+				if (rangeColumns.isEmpty()) {
+					System.out.println("No RANGE_CHECK columns defined in configuration. Skipping removal.");
+					return;
+				}
+				String rangeConditions = rangeColumns.stream()
+						.map(column -> column + " < 0")
+						.collect(Collectors.joining(" OR "));
+				selectInvalidSQL = "SELECT * FROM " + tableName + " WHERE " + rangeConditions;
+				deleteSQL = "DELETE FROM " + tableName + " WHERE " + rangeConditions;
+			}
+			case "DUPLICATE_CHECK" -> {
+				List<String> duplicateColumns = validator.getDuplicateColumns();
+				if (duplicateColumns.isEmpty()) {
+					System.out.println("No DUPLICATE_CHECK columns defined in configuration. Skipping removal.");
+					return;
+				}
+				String groupByColumns = String.join(", ", duplicateColumns);
+				selectInvalidSQL = String.format("""
+                SELECT * 
+                FROM %s 
+                WHERE id NOT IN (
+                    SELECT MIN(id) 
+                    FROM %s 
+                    GROUP BY %s
+                )
+            """, tableName, tableName, groupByColumns);
+				deleteSQL = String.format("""
+                DELETE FROM %s 
+                WHERE id NOT IN (
+                    SELECT MIN(id) 
+                    FROM %s 
+                    GROUP BY %s
+                )
+            """, tableName, tableName, groupByColumns);
+			}
 			default -> throw new IllegalArgumentException("Invalid reason for removing records.");
-		};
+		}
 
-		try (Statement stmt = conn.createStatement()) {
-			int rowsDeleted = stmt.executeUpdate(deleteSQL);
-			System.out.println("Removed " + rowsDeleted + " invalid records due to " + reason);
+		// Di chuyển dữ liệu không hợp lệ sang bảng invalid_records
+		try (Statement selectStmt = conn.createStatement();
+			 Statement deleteStmt = conn.createStatement();
+			 ResultSet rs = selectStmt.executeQuery(selectInvalidSQL)) {
+			while (rs.next()) {
+				String invalidRecord = extractRecordAsJson(rs); // Chuyển bản ghi thành JSON
+				String insertSQL = "INSERT INTO invalid_records (table_name, invalid_record, reason) VALUES (?, ?, ?)";
+				try (PreparedStatement insertStmt = conn.prepareStatement(insertSQL)) {
+					insertStmt.setString(1, tableName);
+					insertStmt.setString(2, invalidRecord);
+					insertStmt.setString(3, reason);
+					insertStmt.executeUpdate();
+				}
+			}
+			// Xóa bản ghi không hợp lệ khỏi bảng gốc
+			int rowsDeleted = deleteStmt.executeUpdate(deleteSQL);
+			System.out.println("Moved and removed " + rowsDeleted + " invalid records due to " + reason);
 		}
 	}
+
+	// Helper: Chuyển ResultSet thành chuỗi JSON
+	private static String extractRecordAsJson(ResultSet rs) throws SQLException, JsonProcessingException {
+		ResultSetMetaData metaData = rs.getMetaData();
+		int columnCount = metaData.getColumnCount();
+		Map<String, Object> recordMap = new HashMap<>();
+		for (int i = 1; i <= columnCount; i++) {
+			recordMap.put(metaData.getColumnName(i), rs.getObject(i));
+		}
+		return new ObjectMapper().writeValueAsString(recordMap); // Dùng thư viện Jackson để chuyển sang JSON
+	}
+
 
 
 	private static void transformAndLoadToWarehouse(ETLControlManager controlManager) throws SQLException {
@@ -139,11 +222,13 @@ public class DataWarehouseETL {
 
 	private static void handleJobFailure(ETLControlManager controlManager, int totalRecordsProcessed, Exception e) {
 		try {
-			LocalDateTime endJobTime = LocalDateTime.now();
 			controlManager.endJob("FAILED", totalRecordsProcessed, e.getMessage());
-		} catch (SQLException ex) {
+		} catch (RuntimeException ex) {
+			System.err.println("Failed to log job failure: " + ex.getMessage());
 			ex.printStackTrace();
 		}
 		e.printStackTrace();
 	}
 }
+
+		
