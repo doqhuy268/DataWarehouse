@@ -9,31 +9,42 @@ import java.util.Properties;
 
 public class ETLControlManager {
 	private static final String CONFIG_FILE = "config.properties";
-	private static String controlDb;
+	private static String controlDbUrl;
 	private Connection controlConn;
 	private int currentJobId;
 
+	// Constructor
 	public ETLControlManager() {
 		loadConfigurations();
-		try {
-			controlConn = DriverManager.getConnection(controlDb);
-		} catch (SQLException e) {
-			throw new RuntimeException("Failed to connect to control database", e);
-		}
+		initializeConnection();
 	}
 
+	// Load configurations from the properties file
 	private static void loadConfigurations() {
 		try (InputStream input = new FileInputStream(CONFIG_FILE)) {
 			Properties props = new Properties();
 			props.load(input);
-			controlDb = props.getProperty("control.db.url");
+			controlDbUrl = props.getProperty("control.db.url");
 		} catch (IOException e) {
-			throw new RuntimeException("Failed to load configurations.", e);
+			throw new RuntimeException("Failed to load configurations from " + CONFIG_FILE, e);
 		}
 	}
 
-	public void startJob(String jobName) throws SQLException {
-		String sql = "INSERT INTO etl_job_log (job_name, start_time, status) VALUES (?, ?, ?)";
+	// Initialize connection to the control database
+	private void initializeConnection() {
+		try {
+			controlConn = DriverManager.getConnection(controlDbUrl);
+		} catch (SQLException e) {
+			throw new RuntimeException("Failed to connect to the control database: " + controlDbUrl, e);
+		}
+	}
+
+	// Start an ETL job and record its metadata
+	public void startJob(String jobName) {
+		String sql = """
+            INSERT INTO etl_job_log (job_name, start_time, status) 
+            VALUES (?, ?, ?)
+        """;
 		try (PreparedStatement pstmt = controlConn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
 			pstmt.setString(1, jobName);
 			pstmt.setTimestamp(2, Timestamp.valueOf(LocalDateTime.now()));
@@ -45,13 +56,19 @@ public class ETLControlManager {
 					currentJobId = rs.getInt(1);
 				}
 			}
+		} catch (SQLException e) {
+			throw new RuntimeException("Failed to start ETL job: " + jobName, e);
 		}
 	}
 
+	// Log an individual ETL step
 	public void logStep(String stepName, LocalDateTime startTime, LocalDateTime endTime, String status,
-			int recordsProcessed, String errorMessage) throws SQLException {
-		String sql = "INSERT INTO etl_step_log (job_id, step_name, start_time, end_time, status, records_processed, error_message) "
-				+ "VALUES (?, ?, ?, ?, ?, ?, ?)";
+						int recordsProcessed, String errorMessage) {
+		String sql = """
+            INSERT INTO etl_step_log 
+            (job_id, step_name, start_time, end_time, status, records_processed, error_message) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """;
 		try (PreparedStatement pstmt = controlConn.prepareStatement(sql)) {
 			pstmt.setInt(1, currentJobId);
 			pstmt.setString(2, stepName);
@@ -61,13 +78,18 @@ public class ETLControlManager {
 			pstmt.setInt(6, recordsProcessed);
 			pstmt.setString(7, errorMessage);
 			pstmt.executeUpdate();
+		} catch (SQLException e) {
+			throw new RuntimeException("Failed to log ETL step: " + stepName, e);
 		}
 	}
 
-	public void logDataQualityCheck(String checkName, String tableName, int failedRecords, String errorDetails)
-			throws SQLException {
-		String sql = "INSERT INTO data_quality_log (job_id, check_name, check_time, table_name, failed_records, error_details) "
-				+ "VALUES (?, ?, ?, ?, ?, ?)";
+	// Log a data quality check
+	public void logDataQualityCheck(String checkName, String tableName, int failedRecords, String errorDetails) {
+		String sql = """
+            INSERT INTO data_quality_log 
+            (job_id, check_name, check_time, table_name, failed_records, error_details) 
+            VALUES (?, ?, ?, ?, ?, ?)
+        """;
 		try (PreparedStatement pstmt = controlConn.prepareStatement(sql)) {
 			pstmt.setInt(1, currentJobId);
 			pstmt.setString(2, checkName);
@@ -76,11 +98,18 @@ public class ETLControlManager {
 			pstmt.setInt(5, failedRecords);
 			pstmt.setString(6, errorDetails);
 			pstmt.executeUpdate();
+		} catch (SQLException e) {
+			throw new RuntimeException("Failed to log data quality check: " + checkName, e);
 		}
 	}
 
-	public void endJob(String status, int recordsProcessed, String errorMessage) throws SQLException {
-		String sql = "UPDATE etl_job_log SET end_time = ?, status = ?, records_processed = ?, error_message = ? WHERE job_id = ?";
+	// End an ETL job with a status
+	public void endJob(String status, int recordsProcessed, String errorMessage) {
+		String sql = """
+            UPDATE etl_job_log 
+            SET end_time = ?, status = ?, records_processed = ?, error_message = ? 
+            WHERE job_id = ?
+        """;
 		try (PreparedStatement pstmt = controlConn.prepareStatement(sql)) {
 			pstmt.setTimestamp(1, Timestamp.valueOf(LocalDateTime.now()));
 			pstmt.setString(2, status);
@@ -88,16 +117,19 @@ public class ETLControlManager {
 			pstmt.setString(4, errorMessage);
 			pstmt.setInt(5, currentJobId);
 			pstmt.executeUpdate();
+		} catch (SQLException e) {
+			throw new RuntimeException("Failed to end ETL job with status: " + status, e);
 		}
 	}
 
+	// Close the connection to the control database
 	public void close() {
 		try {
 			if (controlConn != null && !controlConn.isClosed()) {
 				controlConn.close();
 			}
 		} catch (SQLException e) {
-			e.printStackTrace();
+			System.err.println("Failed to close control database connection: " + e.getMessage());
 		}
 	}
 }
